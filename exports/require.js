@@ -105,10 +105,14 @@
     if (typeof base === 'object') {
       for (var key in base) {
         if (base.hasOwnProperty(key)) {
-          __ASYNC_MODULES__[key] = retry(memoize(base[key], function() {
-            // memoize 加上返回固定值的 resolver，等同于 once，只运行一次的方法
-            return 'once';
-          }));
+          // 因为内部有 require 属于 IO，可能出错，于是加上 retry
+          __ASYNC_MODULES__[key] = {
+            factory: retry(memoize(base[key], function() {
+              // memoize 加上返回固定值的 resolver，等同于 once，只运行一次的方法
+              return 'once';
+            })),
+            value: null,
+          };
         }
       }
       return;
@@ -116,11 +120,23 @@
     
     file = path(base, file);
     if (__ASYNC_MODULES__[file]) {
-      return __ASYNC_MODULES__[file](require.bind(undefined, file), file);
+      // if (__ASYNC_MODULES__[file].value) {
+      //   return Promise.resolve(__ASYNC_MODULES__[file].value);
+      // }
+      // __ASYNC_MODULES__[file].value = {};
+      // // 运行 factory 并立即返回 exports 值。。。并且设置当后续模块初始化失败时重置模块，从而保留下次正常 require 的可能性。。。不过有问题是，导致之前失败的 require 得到的模块已经脱离模块系统
+      // __ASYNC_MODULES__[file].factory(__ASYNC_MODULES__[file].value, require.bind(undefined, file), file).catch(function() {
+      //   __ASYNC_MODULES__[file].value = null;
+      // });
+      // return Promise.resolve(__ASYNC_MODULES__[file].value);
+      // 上面的代码有失败的 require 得到的模块对象将脱离模块系统的问题，使用下面的代码可解决。。。不用担心 factory 重复运行
+      __ASYNC_MODULES__[file].value = __ASYNC_MODULES__[file].value || {};
+      __ASYNC_MODULES__[file].factory(__ASYNC_MODULES__[file].value, require.bind(undefined, file), file);
+      return Promise.resolve(__ASYNC_MODULES__[file].value);
     }
     return download(file).then(function() {
       // 有可能 require('./jquery.min.js') 这样运行了 download('./jquery') 但是不存在 __ASYNC_MODULES__['./jquery']
-      return __ASYNC_MODULES__[file] && __ASYNC_MODULES__[file](require.bind(undefined, file), file);
+      return __ASYNC_MODULES__[file] && require(file);
     });
   };
 })();
